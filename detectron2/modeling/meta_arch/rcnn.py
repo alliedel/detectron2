@@ -39,7 +39,7 @@ class GeneralizedRCNN(nn.Module):
         self.normalizer = lambda x: (x - pixel_mean) / pixel_std
         self.to(self.device)
 
-    def forward(self, batched_inputs):
+    def forward(self, batched_inputs, trace_proposals=False):
         """
         Args:
             batched_inputs: a list, batched outputs of :class:`DatasetMapper` .
@@ -62,8 +62,10 @@ class GeneralizedRCNN(nn.Module):
                 The :class:`Instances` object has the following keys:
                     "pred_boxes", "pred_classes", "scores", "pred_masks", "pred_keypoints"
         """
+        if trace_proposals:
+            assert not self.training
         if not self.training:
-            return self.inference(batched_inputs)
+            return self.inference(batched_inputs, trace_proposals=trace_proposals)
 
         images = self.preprocess_image(batched_inputs)
         if "instances" in batched_inputs[0]:
@@ -92,7 +94,7 @@ class GeneralizedRCNN(nn.Module):
         losses.update(proposal_losses)
         return losses
 
-    def inference(self, batched_inputs, detected_instances=None, do_postprocess=True):
+    def inference(self, batched_inputs, detected_instances=None, do_postprocess=True, trace_proposals=False):
         """
         Run inference on the given inputs.
 
@@ -113,15 +115,21 @@ class GeneralizedRCNN(nn.Module):
 
         images = self.preprocess_image(batched_inputs)
         features = self.backbone(images.tensor)
-
+        proposal_details = None
+        if trace_proposals:
+            assert detected_instances is None
         if detected_instances is None:
             if self.proposal_generator:
                 proposals, _ = self.proposal_generator(images, features, None)
             else:
                 assert "proposals" in batched_inputs[0]
                 proposals = [x["proposals"].to(self.device) for x in batched_inputs]
-
-            results, _ = self.roi_heads(images, features, proposals, None)
+            if trace_proposals:
+                results_d, _ = self.roi_heads.forward_with_traced_proposals(images, features, proposals, None)
+                results = results_d.pop('pred_instances')
+                proposal_details = results_d
+            else:
+                results, _ = self.roi_heads(images, features, proposals, None)
         else:
             detected_instances = [x.to(self.device) for x in detected_instances]
             results = self.roi_heads.forward_with_given_boxes(features, detected_instances)
@@ -135,9 +143,15 @@ class GeneralizedRCNN(nn.Module):
                 width = input_per_image.get("width", image_size[1])
                 r = detector_postprocess(results_per_image, height, width)
                 processed_results.append({"instances": r})
-            return processed_results
+            if trace_proposals:
+                return processed_results, proposal_details
+            else:
+                return processed_results
         else:
-            return results
+            if trace_proposals:
+                return results, proposal_details
+            else:
+                return results
 
     def preprocess_image(self, batched_inputs):
         """

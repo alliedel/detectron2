@@ -98,10 +98,10 @@ def select_proposals_with_visible_keypoints(proposals):
         xs, ys = gt_keypoints[:, :, 0], gt_keypoints[:, :, 1]
         proposal_boxes = proposals_per_image.proposal_boxes.tensor.unsqueeze(dim=1)  # #fg x 1 x 4
         kp_in_box = (
-            (xs >= proposal_boxes[:, :, 0])
-            & (xs <= proposal_boxes[:, :, 2])
-            & (ys >= proposal_boxes[:, :, 1])
-            & (ys <= proposal_boxes[:, :, 3])
+                (xs >= proposal_boxes[:, :, 0])
+                & (xs <= proposal_boxes[:, :, 2])
+                & (ys >= proposal_boxes[:, :, 1])
+                & (ys <= proposal_boxes[:, :, 3])
         )
         selection = (kp_in_box & vis_mask).any(dim=1)
         selection_idxs = torch.nonzero(selection).squeeze(1)
@@ -127,18 +127,18 @@ class ROIHeads(torch.nn.Module):
         super(ROIHeads, self).__init__()
 
         # fmt: off
-        self.batch_size_per_image     = cfg.MODEL.ROI_HEADS.BATCH_SIZE_PER_IMAGE
+        self.batch_size_per_image = cfg.MODEL.ROI_HEADS.BATCH_SIZE_PER_IMAGE
         self.positive_sample_fraction = cfg.MODEL.ROI_HEADS.POSITIVE_FRACTION
-        self.test_score_thresh        = cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST
-        self.test_nms_thresh          = cfg.MODEL.ROI_HEADS.NMS_THRESH_TEST
-        self.test_detections_per_img  = cfg.TEST.DETECTIONS_PER_IMAGE
-        self.in_features              = cfg.MODEL.ROI_HEADS.IN_FEATURES
-        self.num_classes              = cfg.MODEL.ROI_HEADS.NUM_CLASSES
-        self.proposal_append_gt       = cfg.MODEL.ROI_HEADS.PROPOSAL_APPEND_GT
-        self.feature_strides          = {k: v.stride for k, v in input_shape.items()}
-        self.feature_channels         = {k: v.channels for k, v in input_shape.items()}
-        self.cls_agnostic_bbox_reg    = cfg.MODEL.ROI_BOX_HEAD.CLS_AGNOSTIC_BBOX_REG
-        self.smooth_l1_beta           = cfg.MODEL.ROI_BOX_HEAD.SMOOTH_L1_BETA
+        self.test_score_thresh = cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST
+        self.test_nms_thresh = cfg.MODEL.ROI_HEADS.NMS_THRESH_TEST
+        self.test_detections_per_img = cfg.TEST.DETECTIONS_PER_IMAGE
+        self.in_features = cfg.MODEL.ROI_HEADS.IN_FEATURES
+        self.num_classes = cfg.MODEL.ROI_HEADS.NUM_CLASSES
+        self.proposal_append_gt = cfg.MODEL.ROI_HEADS.PROPOSAL_APPEND_GT
+        self.feature_strides = {k: v.stride for k, v in input_shape.items()}
+        self.feature_channels = {k: v.channels for k, v in input_shape.items()}
+        self.cls_agnostic_bbox_reg = cfg.MODEL.ROI_BOX_HEAD.CLS_AGNOSTIC_BBOX_REG
+        self.smooth_l1_beta = cfg.MODEL.ROI_BOX_HEAD.SMOOTH_L1_BETA
         # fmt: on
 
         # Matcher to assign box proposals to gt boxes
@@ -315,10 +315,10 @@ class Res5ROIHeads(ROIHeads):
 
         # fmt: off
         pooler_resolution = cfg.MODEL.ROI_BOX_HEAD.POOLER_RESOLUTION
-        pooler_type       = cfg.MODEL.ROI_BOX_HEAD.POOLER_TYPE
-        pooler_scales     = (1.0 / self.feature_strides[self.in_features[0]], )
-        sampling_ratio    = cfg.MODEL.ROI_BOX_HEAD.POOLER_SAMPLING_RATIO
-        self.mask_on      = cfg.MODEL.MASK_ON
+        pooler_type = cfg.MODEL.ROI_BOX_HEAD.POOLER_TYPE
+        pooler_scales = (1.0 / self.feature_strides[self.in_features[0]],)
+        sampling_ratio = cfg.MODEL.ROI_BOX_HEAD.POOLER_SAMPLING_RATIO
+        self.mask_on = cfg.MODEL.MASK_ON
         # fmt: on
         assert not cfg.MODEL.KEYPOINT_ON
 
@@ -343,12 +343,12 @@ class Res5ROIHeads(ROIHeads):
     def _build_res5_block(self, cfg):
         # fmt: off
         stage_channel_factor = 2 ** 3  # res5 is 8x res2
-        num_groups           = cfg.MODEL.RESNETS.NUM_GROUPS
-        width_per_group      = cfg.MODEL.RESNETS.WIDTH_PER_GROUP
-        bottleneck_channels  = num_groups * width_per_group * stage_channel_factor
-        out_channels         = cfg.MODEL.RESNETS.RES2_OUT_CHANNELS * stage_channel_factor
-        stride_in_1x1        = cfg.MODEL.RESNETS.STRIDE_IN_1X1
-        norm                 = cfg.MODEL.RESNETS.NORM
+        num_groups = cfg.MODEL.RESNETS.NUM_GROUPS
+        width_per_group = cfg.MODEL.RESNETS.WIDTH_PER_GROUP
+        bottleneck_channels = num_groups * width_per_group * stage_channel_factor
+        out_channels = cfg.MODEL.RESNETS.RES2_OUT_CHANNELS * stage_channel_factor
+        stride_in_1x1 = cfg.MODEL.RESNETS.STRIDE_IN_1X1
+        norm = cfg.MODEL.RESNETS.NORM
         assert not cfg.MODEL.RESNETS.DEFORM_ON_PER_STAGE[-1], \
             "Deformable conv is not yet supported in res5 head."
         # fmt: on
@@ -466,9 +466,9 @@ class StandardROIHeads(ROIHeads):
     def _init_box_head(self, cfg):
         # fmt: off
         pooler_resolution = cfg.MODEL.ROI_BOX_HEAD.POOLER_RESOLUTION
-        pooler_scales     = tuple(1.0 / self.feature_strides[k] for k in self.in_features)
-        sampling_ratio    = cfg.MODEL.ROI_BOX_HEAD.POOLER_SAMPLING_RATIO
-        pooler_type       = cfg.MODEL.ROI_BOX_HEAD.POOLER_TYPE
+        pooler_scales = tuple(1.0 / self.feature_strides[k] for k in self.in_features)
+        sampling_ratio = cfg.MODEL.ROI_BOX_HEAD.POOLER_SAMPLING_RATIO
+        pooler_type = cfg.MODEL.ROI_BOX_HEAD.POOLER_TYPE
         # fmt: on
 
         # If StandardROIHeads is applied on multiple feature maps (as in FPN),
@@ -496,13 +496,13 @@ class StandardROIHeads(ROIHeads):
 
     def _init_mask_head(self, cfg):
         # fmt: off
-        self.mask_on           = cfg.MODEL.MASK_ON
+        self.mask_on = cfg.MODEL.MASK_ON
         if not self.mask_on:
             return
         pooler_resolution = cfg.MODEL.ROI_MASK_HEAD.POOLER_RESOLUTION
-        pooler_scales     = tuple(1.0 / self.feature_strides[k] for k in self.in_features)
-        sampling_ratio    = cfg.MODEL.ROI_MASK_HEAD.POOLER_SAMPLING_RATIO
-        pooler_type       = cfg.MODEL.ROI_MASK_HEAD.POOLER_TYPE
+        pooler_scales = tuple(1.0 / self.feature_strides[k] for k in self.in_features)
+        sampling_ratio = cfg.MODEL.ROI_MASK_HEAD.POOLER_SAMPLING_RATIO
+        pooler_type = cfg.MODEL.ROI_MASK_HEAD.POOLER_TYPE
         # fmt: on
 
         in_channels = [self.feature_channels[f] for f in self.in_features][0]
@@ -519,15 +519,16 @@ class StandardROIHeads(ROIHeads):
 
     def _init_keypoint_head(self, cfg):
         # fmt: off
-        self.keypoint_on                         = cfg.MODEL.KEYPOINT_ON
+        self.keypoint_on = cfg.MODEL.KEYPOINT_ON
         if not self.keypoint_on:
             return
-        pooler_resolution                        = cfg.MODEL.ROI_KEYPOINT_HEAD.POOLER_RESOLUTION
-        pooler_scales                            = tuple(1.0 / self.feature_strides[k] for k in self.in_features)  # noqa
-        sampling_ratio                           = cfg.MODEL.ROI_KEYPOINT_HEAD.POOLER_SAMPLING_RATIO
-        pooler_type                              = cfg.MODEL.ROI_KEYPOINT_HEAD.POOLER_TYPE
-        self.normalize_loss_by_visible_keypoints = cfg.MODEL.ROI_KEYPOINT_HEAD.NORMALIZE_LOSS_BY_VISIBLE_KEYPOINTS  # noqa
-        self.keypoint_loss_weight                = cfg.MODEL.ROI_KEYPOINT_HEAD.LOSS_WEIGHT
+        pooler_resolution = cfg.MODEL.ROI_KEYPOINT_HEAD.POOLER_RESOLUTION
+        pooler_scales = tuple(1.0 / self.feature_strides[k] for k in self.in_features)  # noqa
+        sampling_ratio = cfg.MODEL.ROI_KEYPOINT_HEAD.POOLER_SAMPLING_RATIO
+        pooler_type = cfg.MODEL.ROI_KEYPOINT_HEAD.POOLER_TYPE
+        self.normalize_loss_by_visible_keypoints = cfg.MODEL.ROI_KEYPOINT_HEAD.NORMALIZE_LOSS_BY_VISIBLE_KEYPOINTS
+        # noqa
+        self.keypoint_loss_weight = cfg.MODEL.ROI_KEYPOINT_HEAD.LOSS_WEIGHT
         # fmt: on
 
         in_channels = [self.feature_channels[f] for f in self.in_features][0]
@@ -566,6 +567,28 @@ class StandardROIHeads(ROIHeads):
             # applied to the top scoring box detections.
             pred_instances = self.forward_with_given_boxes(features, pred_instances)
             return pred_instances, {}
+
+    def forward_with_traced_proposals(self, images, features, proposals, targets=None):
+        """
+        See :class:`ROIHeads.forward`.
+        """
+        assert not self.training
+        del images
+        if self.training:
+            proposals = self.label_and_sample_proposals(proposals, targets)
+        del targets
+
+        features_list = [features[f] for f in self.in_features]
+
+        pred_instances, selected_proposal_idxs, boxes, scores = self._forward_box_with_traced_proposals(features_list,
+                                                                                                        proposals)
+        # During inference cascaded prediction is used: the mask and keypoints heads are only
+        # applied to the top scoring box detections.
+        pred_instances = self.forward_with_given_boxes(features, pred_instances)
+        return {'pred_instances': pred_instances,
+                'selected_proposal_idxs': selected_proposal_idxs,
+                'boxes': boxes,
+                'scores': scores}, {}
 
     def forward_with_given_boxes(self, features, instances):
         """
@@ -628,6 +651,44 @@ class StandardROIHeads(ROIHeads):
             )
             return pred_instances
 
+    def _forward_box_with_traced_proposals(self, features, proposals):
+        """
+        Forward logic of the box prediction branch.
+
+        Args:
+            features (list[Tensor]): #level input features for box prediction
+            proposals (list[Instances]): the per-image object proposals with
+                their matching ground truth.
+                Each has fields "proposal_boxes", and "objectness_logits",
+                "gt_classes", "gt_boxes".
+
+        Returns:
+            In training, a dict of losses.
+            In inference, a list of `Instances`, the predicted instances.
+        """
+        assert not self.training
+        box_features = self.box_pooler(features, [x.proposal_boxes for x in proposals])
+        box_features = self.box_head(box_features)
+        pred_class_logits, pred_proposal_deltas = self.box_predictor(box_features)
+        del box_features
+
+        outputs = FastRCNNOutputs(
+            self.box2box_transform,
+            pred_class_logits,
+            pred_proposal_deltas,
+            proposals,
+            self.smooth_l1_beta,
+        )
+
+        boxes = outputs.predict_boxes()
+        scores = outputs.predict_probs()
+
+        pred_instances, selected_proposal_indices = outputs.inference(
+            self.test_score_thresh, self.test_nms_thresh, self.test_detections_per_img
+        )
+
+        return pred_instances, selected_proposal_indices, boxes, scores
+
     def _forward_mask(self, features, instances):
         """
         Forward logic of the mask prediction branch.
@@ -688,10 +749,10 @@ class StandardROIHeads(ROIHeads):
             keypoint_logits = self.keypoint_head(keypoint_features)
 
             normalizer = (
-                num_images
-                * self.batch_size_per_image
-                * self.positive_sample_fraction
-                * keypoint_logits.shape[1]
+                    num_images
+                    * self.batch_size_per_image
+                    * self.positive_sample_fraction
+                    * keypoint_logits.shape[1]
             )
             loss = keypoint_rcnn_loss(
                 keypoint_logits,
