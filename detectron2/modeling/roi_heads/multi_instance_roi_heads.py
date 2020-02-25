@@ -73,53 +73,6 @@ class MultiROIHeadsAPD(StandardROIHeads):
         self.standard_mask_head = self.mask_heads[MASK_HEAD_TYPES['standard']]
         self.custom_mask_head = self.mask_heads[MASK_HEAD_TYPES['custom']]
 
-    def forward(self, images, features, proposals, targets=None):
-        """
-        See :class:`ROIHeads.forward`.
-        """
-        del images
-        if self.training:
-            proposals = self.label_and_sample_proposals(proposals, targets)
-        del targets
-
-        features_list = [features[f] for f in self.in_features]
-
-        if self.training:
-            losses = self._forward_box(features_list, proposals)
-            # During training the proposals used by the box head are
-            # used by the mask, keypoint (and densepose) heads.
-            losses.update(self._forward_mask(features_list, proposals))
-            losses.update(self._forward_keypoint(features_list, proposals))
-            return proposals, losses
-        else:
-            pred_instances = self._forward_box(features_list, proposals)
-            # During inference cascaded prediction is used: the mask and keypoints heads are only
-            # applied to the top scoring box detections.
-            pred_instances = self.forward_with_given_boxes(features, pred_instances)
-            return pred_instances, {}
-
-    def forward_with_traced_proposals(self, images, features, proposals, targets=None):
-        """
-        See :class:`ROIHeads.forward`.
-        """
-        assert not self.training
-        del images
-        if self.training:
-            proposals = self.label_and_sample_proposals(proposals, targets)
-        del targets
-
-        features_list = [features[f] for f in self.in_features]
-
-        pred_instances, selected_proposal_idxs, boxes, scores = self._forward_box_with_traced_proposals(features_list,
-                                                                                                        proposals)
-        # During inference cascaded prediction is used: the mask and keypoints heads are only
-        # applied to the top scoring box detections.
-        pred_instances = self.forward_with_given_boxes(features, pred_instances)
-        return {'pred_instances': pred_instances,
-                'selected_proposal_idxs': selected_proposal_idxs,
-                'boxes': boxes,
-                'scores': scores}, {}
-
     def _forward_mask(self, features, instances):
         """
         Forward logic of the mask prediction branch.
