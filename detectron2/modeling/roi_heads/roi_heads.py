@@ -585,6 +585,7 @@ class StandardROIHeads(ROIHeads):
         # During inference cascaded prediction is used: the mask and keypoints heads are only
         # applied to the top scoring box detections.
         pred_instances = self.forward_with_given_boxes(features, pred_instances)
+        assert all(len(pred_i) == len(sel_i) for pred_i, sel_i in zip(pred_instances, selected_proposal_idxs))
         return {'pred_instances': pred_instances,
                 'selected_proposal_idxs': selected_proposal_idxs,
                 'boxes': boxes,

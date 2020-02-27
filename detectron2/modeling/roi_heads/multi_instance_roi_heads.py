@@ -60,18 +60,18 @@ class MultiROIHeadsAPD(StandardROIHeads):
             pooler_type=pooler_type,
         )
         self.mask_heads = {
-            MASK_HEAD_TYPES['standard']: build_mask_head(
+            head_type_name: build_mask_head(
                 cfg, ShapeSpec(channels=in_channels, width=pooler_resolution, height=pooler_resolution)
-            ),
-            MASK_HEAD_TYPES['custom']: build_mask_head(
-                cfg, ShapeSpec(channels=in_channels, width=pooler_resolution, height=pooler_resolution)
-            )
+            ) for head_type_name in MASK_HEAD_TYPES
         }
 
         # 'hacky' addition: Point to them directly for correct initialization (to get their weights on the same CUDA
         # device -- NOTE: This worked! (and will fail without this, as long as they are only in dictionaries)
         self.standard_mask_head = self.mask_heads[MASK_HEAD_TYPES['standard']]
         self.custom_mask_head = self.mask_heads[MASK_HEAD_TYPES['custom']]
+        self.mask_head = None  # To make sure we don't use the base class instantiation accidentally.
+        # TODO(Allie): mask_head=None is very sloppy.  Probably should not inherit, and should just use class methods,
+        #  but ensures we reuse as much of detectron2's original code as possible.
 
     def _forward_mask(self, features, instances):
         """
@@ -91,7 +91,7 @@ class MultiROIHeadsAPD(StandardROIHeads):
             return {} if self.training else instances
 
         if self.training:
-            # The loss is only defined on positive prpoposals.
+            # The loss is only defined on positive proposals.
             proposals, _ = select_foreground_proposals(instances, self.num_classes)
             proposal_boxes = [x.proposal_boxes for x in proposals]
             mask_features = self.mask_pooler(features, proposal_boxes)
