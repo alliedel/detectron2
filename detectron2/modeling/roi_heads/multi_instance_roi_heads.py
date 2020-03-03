@@ -1,9 +1,12 @@
 # Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
 import logging
+import torch
 
 from detectron2.layers import ShapeSpec
-from detectron2.modeling.roi_heads.roi_heads import StandardROIHeads, select_foreground_proposals
+from detectron2.modeling.roi_heads.roi_heads import StandardROIHeads, select_foreground_proposals, get_event_storage
 from detectron2.structures import Instances
+from detectron2.layers import cat
+from torch.nn import functional as F
 from detectron2.modeling.roi_heads.fast_rcnn import FastRCNNOutputs
 from detectron2.modeling.roi_heads.mask_head import build_mask_head, mask_rcnn_inference, mask_rcnn_loss
 from detectron2.modeling.poolers import ROIPooler
@@ -42,6 +45,7 @@ class MultiROIHeadsAPD(StandardROIHeads):
 
     def _init_mask_heads(self, cfg):
         # fmt: off
+        self.proposal_selection_function_for_loss = None
         self.mask_on = cfg.MODEL.MASK_ON
         if not self.mask_on:
             return
@@ -96,10 +100,29 @@ class MultiROIHeadsAPD(StandardROIHeads):
             proposal_boxes = [x.proposal_boxes for x in proposals]
             mask_features = self.mask_pooler(features, proposal_boxes)
             mask_logits = self.mask_heads[self.active_mask_head](mask_features)
-            return {"loss_mask": mask_rcnn_loss(mask_logits, proposals)}
+            if self.proposal_selection_function_for_loss is None:
+                return {"loss_mask": mask_rcnn_loss(mask_logits, proposals)}
+            else:
+                return {"loss_mask": mask_rcnn_loss_with_proposal_subset(mask_logits, proposals,
+                                                                         self.proposal_selection_function_for_loss)}
         else:
             pred_boxes = [x.pred_boxes for x in instances]
             mask_features = self.mask_pooler(features, pred_boxes)
             mask_logits = self.mask_heads[self.active_mask_head](mask_features)
             mask_rcnn_inference(mask_logits, instances)
             return instances
+
+
+def find_largest_proposal_per_image(mask_logits, proposals):
+    raise NotImplementedError
+
+
+def mask_rcnn_loss_with_proposal_subset(mask_logits, proposals, proposal_selection_function):
+    if proposal_selection_function is None:
+        selected_mask_logits, selected_proposals = mask_logits, proposals
+    else:
+        selected_idxs = proposal_selection_function(mask_logits, proposals)
+        selected_mask_logits = [ml[si] for ml, si in zip(mask_logits, selected_idxs)]
+        selected_proposals = [p[si] for p, si in zip(proposals, selected_idxs)]
+
+    return mask_rcnn_loss(selected_mask_logits, selected_proposals)
