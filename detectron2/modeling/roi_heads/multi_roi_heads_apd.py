@@ -1,16 +1,16 @@
 # Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
 import logging
+
 import torch
 
 from detectron2.layers import ShapeSpec
-from detectron2.modeling.roi_heads.roi_heads import StandardROIHeads, select_foreground_proposals, get_event_storage
-from detectron2.structures import Instances
-from detectron2.layers import cat
-from torch.nn import functional as F
-from detectron2.modeling.roi_heads.fast_rcnn import FastRCNNOutputs
-from detectron2.modeling.roi_heads.mask_head import build_mask_head, mask_rcnn_inference, mask_rcnn_loss
 from detectron2.modeling.poolers import ROIPooler
+from detectron2.modeling.roi_heads.mask_head import build_mask_head, mask_rcnn_inference, mask_rcnn_loss
+from detectron2.modeling.roi_heads.multi_mask_head_apd import build_custom_mask_head, multi_mask_rcnn_inference, \
+    multi_mask_rcnn_loss
 from detectron2.modeling.roi_heads.roi_heads import ROI_HEADS_REGISTRY
+from detectron2.modeling.roi_heads.roi_heads import StandardROIHeads, select_foreground_proposals
+from detectron2.structures import Instances
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +45,8 @@ class MultiROIHeadsAPD(StandardROIHeads):
 
     def _init_mask_heads(self, cfg):
         # fmt: off
-        self.proposal_selection_function_for_loss = largest_box_per_class
+        # self.proposal_selection_function_for_loss = largest_box_per_class
+        self.proposal_selection_function_for_loss = None
         self.mask_on = cfg.MODEL.MASK_ON
         if not self.mask_on:
             return
@@ -63,11 +64,16 @@ class MultiROIHeadsAPD(StandardROIHeads):
             sampling_ratio=sampling_ratio,
             pooler_type=pooler_type,
         )
-        self.mask_heads = {
-            head_type_name: build_mask_head(
-                cfg, ShapeSpec(channels=in_channels, width=pooler_resolution, height=pooler_resolution)
-            ) for head_type_name in MASK_HEAD_TYPES
-        }
+        self.mask_heads = {}
+        for head_type_name in MASK_HEAD_TYPES:
+            if head_type_name == 'standard':
+                self.mask_heads[head_type_name] = build_mask_head(
+                    cfg, ShapeSpec(channels=in_channels, width=pooler_resolution, height=pooler_resolution))
+            elif head_type_name == 'custom':
+                self.mask_heads[head_type_name] = build_custom_mask_head(
+                    cfg, ShapeSpec(channels=in_channels, width=pooler_resolution, height=pooler_resolution))
+            else:
+                raise ValueError(f'{head_type_name} is not one of head types')
 
         # 'hacky' addition: Point to them directly for correct initialization (to get their weights on the same CUDA
         # device -- NOTE: This worked! (and will fail without this, as long as they are only in dictionaries)
