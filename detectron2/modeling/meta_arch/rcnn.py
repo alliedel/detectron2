@@ -134,6 +134,7 @@ class GeneralizedRCNN(nn.Module):
             detected_instances = [x.to(self.device) for x in detected_instances]
             results = self.roi_heads.forward_with_given_boxes(features, detected_instances)
 
+        proposal_details = self.dictoflists_to_listofdicts(proposal_details)
         if do_postprocess:
             processed_results = []
             for results_per_image, input_per_image, image_size in zip(
@@ -161,6 +162,17 @@ class GeneralizedRCNN(nn.Module):
         images = [self.normalizer(x) for x in images]
         images = ImageList.from_tensors(images, self.backbone.size_divisibility)
         return images
+
+    @staticmethod
+    def dictoflists_to_listofdicts(dictoflists):
+        n = None
+        for k, v in dictoflists.items():
+            if n is None:
+                n = len(v)
+            else:
+                assert len(v) == n
+        listofdicts = [{k: v[i] for k, v in dictoflists.items()} for i in range(n)]
+        return listofdicts
 
 
 @META_ARCH_REGISTRY.register()
