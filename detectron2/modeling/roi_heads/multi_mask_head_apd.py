@@ -5,30 +5,37 @@ from torch import nn
 from torch.nn import functional as F
 
 from detectron2.layers import Conv2d, ConvTranspose2d, ShapeSpec, cat, get_norm
-from detectron2.modeling.roi_heads.mask_head import ROI_MASK_HEAD_REGISTRY
+from detectron2.modeling.roi_heads.mask_head import ROI_MASK_HEAD_REGISTRY, get_event_storage, mask_rcnn_loss, \
+    mask_rcnn_inference
 
 
-def multi_mask_rcnn_loss(pred_mask_logits, instances):
+def multi_mask_rcnn_loss(pred_mask_logits, instances, n_masks_per_roi=2):
     """
-    Compute the mask prediction loss defined in the Mask R-CNN paper.
-
-    Args:
-        pred_mask_logits (Tensor): A tensor of shape (B, C, Hmask, Wmask) or (B, 1, Hmask, Wmask)
-            for class-specific or class-agnostic, where B is the total number of predicted masks
-            in all images, C is the number of foreground classes, and Hmask, Wmask are the height
-            and width of the mask predictions. The values are logits.
-        instances (list[Instances]): A list of N Instances, where N is the number of images
-            in the batch. These instances are in 1:1
-            correspondence with the pred_mask_logits. The ground-truth labels (class, box, mask,
-            ...) associated with each instance are stored in fields.
-
+    pred_mask_logits (Tensor): A tensor of shape (B, C*I, Hmask, Wmask) or (B, 1, Hmask, Wmask)
+        for class-specific or class-agnostic, where B is the total number of predicted masks
+        in all images, I is the number of instances per class, C is the number of foreground classes, and Hmask,
+        Wmask are the height and width of the mask predictions. The values are logits.
+        NOTE on ordering of second channel: pred_mask_logits[:, ::n_masks_per_roi, :, :] should give one instance mask
+        for each class (masks per class should be 'grouped' together).
+    instances (list[Instances]): A list of N Instances, where N is the number of images
+        in the batch. These instances are in 1:1
+        correspondence with the pred_mask_logits. The ground-truth labels (class, box, mask, ...) associated with
+        each instance are stored in fields.
+    n_masks_per_roi: The number of masks per ROI/cls (I)
     Returns:
         mask_loss (Tensor): A scalar tensor containing the loss.
     """
-    raise NotImplementedError
+    n_masks = pred_mask_logits.size(1)
+    n_cls = n_masks // n_masks_per_roi
+    assert (float(n_masks) / n_masks_per_roi) == n_cls, ValueError('Should be divisible by n_instances_per_class')
+
+    # Temporary test: len(instances) == pred_mask_logits.size(1) / n_masks_per_roi
+    logit_sets = [pred_mask_logits[:, ::n_masks_per_roi, :, :] for i in range(n_masks_per_roi)]
+    losses = [mask_rcnn_loss(logits, instances) for logits in logit_sets]
+    return sum(losses)
 
 
-def multi_mask_rcnn_inference(pred_mask_logits, pred_instances):
+def multi_mask_rcnn_inference(pred_mask_logits, pred_instances, n_instances_per_class=2):
     """
     Convert pred_mask_logits to estimated foreground probability masks while also
     extracting only the masks for the predicted classes in pred_instances. For each
@@ -36,10 +43,12 @@ def multi_mask_rcnn_inference(pred_mask_logits, pred_instances):
     new "pred_masks" field to pred_instances.
 
     Args:
-        pred_mask_logits (Tensor): A tensor of shape (B, C, Hmask, Wmask) or (B, 1, Hmask, Wmask)
+        pred_mask_logits (Tensor): A tensor of shape (B, C*I, Hmask, Wmask) or (B, 1, Hmask, Wmask)
             for class-specific or class-agnostic, where B is the total number of predicted masks
-            in all images, C is the number of foreground classes, and Hmask, Wmask are the height
-            and width of the mask predictions. The values are logits.
+            in all images, I is the number of instances per class, C is the number of foreground classes, and Hmask,
+            Wmask are the height and width of the mask predictions. The values are logits.
+            NOTE on ordering of second channel: pred_mask_logits[:, ::n_masks_per_roi, :, :] should give one instance mask
+            for each class (masks per class should be 'grouped' together).
         pred_instances (list[Instances]): A list of N Instances, where N is the number of images
             in the batch. Each Instances must have field "pred_classes".
 
@@ -50,7 +59,29 @@ def multi_mask_rcnn_inference(pred_mask_logits, pred_instances):
             the predicted masks to the original image resolution and/or binarizing them, is left
             to the caller.
     """
-    raise NotImplementedError
+    assert pred_mask_logits.shape[1] % n_instances_per_class == 0, \
+        f'{pred_mask_logits.shape[1]} % {n_instances_per_class} != 0'  # Should be C*I
+    cls_agnostic_mask = pred_mask_logits.size(1) == n_instances_per_class
+
+    if cls_agnostic_mask:
+        mask_probs_pred = pred_mask_logits.sigmoid()
+    else:
+        # Select masks corresponding to the predicted classes
+        num_masks = pred_mask_logits.shape[0]
+        class_pred = cat([i.pred_classes for i in pred_instances])
+        indices_ch1 = torch.arange(num_masks, device=class_pred.device)
+        mask_probs_pred_ch1 = pred_mask_logits[indices_ch1, class_pred * n_instances_per_class][:, None].sigmoid()
+        indices_ch2 = torch.arange(num_masks, device=class_pred.device)
+        mask_probs_pred_ch2 = pred_mask_logits[indices_ch2, class_pred * n_instances_per_class + 1][:, None].sigmoid()
+    # mask_probs_pred.shape: (B, 1, Hmask, Wmask)
+
+    num_boxes_per_image = [len(i) for i in pred_instances]
+    mask_probs_pred_ch1 = mask_probs_pred_ch1.split(num_boxes_per_image, dim=0)
+    mask_probs_pred_ch2 = mask_probs_pred_ch2.split(num_boxes_per_image, dim=0)
+
+    for prob_ch1, prob_ch2, instances in zip(mask_probs_pred_ch1, mask_probs_pred_ch2, pred_instances):
+        instances.pred_masks = prob_ch1  # (1, Hmask, Wmask)
+        instances.pred_masks2 = prob_ch2  # (1, Hmask, Wmask)
 
 
 @ROI_MASK_HEAD_REGISTRY.register()
@@ -59,6 +90,7 @@ class CustomMaskRCNNConvUpsampleHeadAPD(nn.Module):
     A custom mask head that produces more than one instance per thing class.  Similar to
     MaskRCNNConvUpsampleHead.
     """
+    num_instances_per_class = 2
 
     def __init__(self, cfg, input_shape: ShapeSpec):
         """
@@ -103,7 +135,8 @@ class CustomMaskRCNNConvUpsampleHeadAPD(nn.Module):
         )
 
         num_mask_classes = 1 if cls_agnostic_mask else num_classes
-        self.predictor = Conv2d(conv_dims, num_mask_classes, kernel_size=1, stride=1, padding=0)
+        self.predictor = Conv2d(conv_dims, num_mask_classes * self.num_instances_per_class, kernel_size=1, stride=1,
+                                padding=0)
 
         for layer in self.conv_norm_relus + [self.deconv]:
             weight_init.c2_msra_fill(layer)

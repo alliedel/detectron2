@@ -106,16 +106,27 @@ class MultiROIHeadsAPD(StandardROIHeads):
             proposal_boxes = [x.proposal_boxes for x in proposals]
             mask_features = self.mask_pooler(features, proposal_boxes)
             mask_logits = self.mask_heads[self.active_mask_head](mask_features)
-            if self.proposal_selection_function_for_loss is None:
+            if self.active_mask_head is 'standard':
                 return {"loss_mask": mask_rcnn_loss(mask_logits, proposals)}
-            else:
-                return {"loss_mask": mask_rcnn_loss_with_proposal_subset(mask_logits, proposals,
-                                                                         self.proposal_selection_function_for_loss)}
+            elif self.active_mask_head is 'custom':
+                return {"loss_mask": multi_mask_rcnn_loss(mask_logits, proposals)}
         else:
             pred_boxes = [x.pred_boxes for x in instances]
             mask_features = self.mask_pooler(features, pred_boxes)
             mask_logits = self.mask_heads[self.active_mask_head](mask_features)
-            mask_rcnn_inference(mask_logits, instances)
+            if self.active_mask_head is 'standard':
+                mask_rcnn_inference(mask_logits, instances)
+            elif self.active_mask_head is 'custom':
+                if 1:
+                    mask_rcnn_inference(mask_logits, instances)
+                    for inst in instances:
+                        inst.pred_masks_standard = inst.pred_masks
+                        inst.pred_masks = [None for _ in inst.pred_masks]
+                multi_mask_rcnn_inference(mask_logits, instances,
+                                          self.mask_heads[self.active_mask_head].num_instances_per_class)
+            else:
+                raise ValueError
+
             return instances
 
 

@@ -4,6 +4,7 @@ MODEL:
   MASK_ON: True
   ROI_MASK_HEAD:
     INIT_ACTIVATED_MASK_HEAD: "standard"
+    N_MASKS_PER_ROI: 2
   ROI_HEADS:
     NAME: "MultiROIHeadsAPD"
   RESNETS:
