@@ -1,16 +1,21 @@
 # Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
+
 import logging
 
+import numpy as np
 import torch
+from detectron2.modeling.matcher import Matcher
 
 from detectron2.layers import ShapeSpec
-from detectron2.modeling.poolers import ROIPooler
-from detectron2.modeling.roi_heads.mask_head import build_mask_head, mask_rcnn_inference, mask_rcnn_loss
 from detectron2.modeling.roi_heads.multi_mask_head_apd import build_custom_mask_head, multi_mask_rcnn_inference, \
     multi_mask_rcnn_loss
 from detectron2.modeling.roi_heads.roi_heads import ROI_HEADS_REGISTRY
 from detectron2.modeling.roi_heads.roi_heads import StandardROIHeads, select_foreground_proposals
-from detectron2.structures import Instances
+from detectron2.structures import Boxes, Instances, pairwise_iou
+from detectron2.utils.events import get_event_storage
+from .mask_head import build_mask_head, mask_rcnn_inference, mask_rcnn_loss
+from ..poolers import ROIPooler
+from ..proposal_generator.proposal_utils import add_ground_truth_to_proposals
 
 logger = logging.getLogger(__name__)
 
@@ -75,13 +80,132 @@ class MultiROIHeadsAPD(StandardROIHeads):
             else:
                 raise ValueError(f'{head_type_name} is not one of head types')
 
-        # 'hacky' addition: Point to them directly for correct initialization (to get their weights on the same CUDA
-        # device -- NOTE: This worked! (and will fail without this, as long as they are only in dictionaries)
+        # NOTE(allie): 'hacky' addition: Point to them directly for correct initialization (to get their weights on the
+        # same CUDA device -- NOTE: This worked! (and will fail without this, as long as they are only in dictionaries)
         self.standard_mask_head = self.mask_heads[MASK_HEAD_TYPES['standard']]
         self.custom_mask_head = self.mask_heads[MASK_HEAD_TYPES['custom']]
         self.mask_head = None  # To make sure we don't use the base class instantiation accidentally.
         # TODO(Allie): mask_head=None is very sloppy.  Probably should not inherit, and should just use class methods,
         #  but ensures we reuse as much of detectron2's original code as possible.
+
+    @torch.no_grad()
+    def label_and_sample_proposals(self, proposals, targets):
+        """
+        ** APD modified from StandardROIHeads in roi_heads.py to handle matching of more than one groundtruth 
+        Same functionality as its parent counterpart, but assigns *all* groundtruth overlapping with the box of the
+        same class to the box.
+        **
+
+        Prepare some proposals to be used to train the ROI heads.
+        It performs box matching between `proposals` and `targets`, and assigns
+        training labels to the proposals.
+        It returns `self.batch_size_per_image` random samples from proposals and groundtruth boxes,
+        with a fraction of positives that is no larger than `self.positive_sample_fraction.
+
+        Args:
+            See :meth:`ROIHeads.forward`
+
+        Returns:
+            list[Instances]:
+                length `N` list of `Instances`s containing the proposals
+                sampled for training. Each `Instances` has the following fields:
+                - proposal_boxes: the proposal boxes
+                - gt_boxes: the ground-truth box that the proposal is assigned to
+                  (this is only meaningful if the proposal has a label > 0; if label = 0
+                   then the ground-truth box is random)
+                Other fields such as "gt_classes", "gt_masks", that's included in `targets`.
+        """
+        gt_boxes = [x.gt_boxes for x in targets]
+        # Augment proposals with ground-truth boxes.
+        if self.proposal_append_gt:
+            proposals = add_ground_truth_to_proposals(gt_boxes, proposals)
+
+        proposals_with_gt = []
+
+        num_fg_samples = []
+        num_bg_samples = []
+        for proposals_per_image, targets_per_image in zip(proposals, targets):
+            has_gt = len(targets_per_image) > 0
+            match_quality_matrix = pairwise_iou(
+                targets_per_image.gt_boxes, proposals_per_image.proposal_boxes
+            )
+            matched_idxs, matched_labels = self.proposal_matcher(match_quality_matrix)
+            # contains indices, iou match values
+
+            sampled_idxs, gt_classes = self._sample_proposals(
+                matched_idxs, matched_labels, targets_per_image.gt_classes
+            )
+
+            # APD: Multi-instance addition. Add secondary gt for foreground proposal samples
+
+            # torch.topk:
+            # topk.indices[r, c] contains the groundtruth index of the r'th best match to proposal c
+            # topk.values[r, c] contains the iou overlap between proposal c and groundtruth topk.indices[r, c]
+            # topk.values should be in the range (0, 1)
+
+            # We are going to modify match_quality_marix to make values of 0 if the classes do not match.  We will then
+            # get the indices of all nonzero elements.
+            secondary_match_quality_matrix = match_quality_matrix
+            del match_quality_matrix
+            NOT_SAME_CLASS = PRIMARY_ASSIGNMENT = 0
+            for gt_idx, gt_cls in enumerate(targets_per_image.gt_classes):
+                proposals_matched_to_this_gt = matched_idxs == gt_idx
+                if torch.any(proposals_matched_to_this_gt):
+                    gt_of_other_clss = targets_per_image.gt_classes != gt_cls
+                    secondary_match_quality_matrix[gt_of_other_clss][:, proposals_matched_to_this_gt] = NOT_SAME_CLASS
+                    secondary_match_quality_matrix[gt_idx, proposals_matched_to_this_gt] = PRIMARY_ASSIGNMENT
+
+            # r,c of proposal, alternate gt_idx mapping.  For instance:
+            #   (0,0), (1,1), (1,3) means proposal 0 has alternate gt 0, proposal 1 has alternate gt 1, and proposal 3
+            #   has alternate gt 1.
+
+            secondary_assignments = secondary_match_quality_matrix.nonzero()
+            second_best_assignments = secondary_match_quality_matrix.max(axis=0)
+
+            # Set target attributes of the sampled proposals:
+            proposals_per_image = proposals_per_image[sampled_idxs]
+            proposals_per_image.gt_classes = gt_classes
+
+            # We index all the attributes of targets that start with "gt_"
+            # and have not been added to proposals yet (="gt_classes").
+            if has_gt:
+                sampled_targets = matched_idxs[sampled_idxs]
+                # NOTE: here the indexing waste some compute, because heads
+                # like masks, keypoints, etc, will filter the proposals again,
+                # (by foreground/background, or number of keypoints in the image, etc)
+                # so we essentially index the data twice.
+                for (trg_name, trg_value) in targets_per_image.get_fields().items():
+                    if trg_name.startswith("gt_") and not proposals_per_image.has(trg_name):
+                        proposals_per_image.set(trg_name, trg_value[sampled_targets])
+
+                # Assigning second best indices
+                sampled_second_best_targets = second_best_assignments.indices[sampled_idxs]
+                no_second_best_target = second_best_assignments.values == 0
+                for (trg_name, trg_value) in targets_per_image.get_fields().items():
+                    empty_target = type(trg_value)([])  # Create empty instance
+                    if trg_name.startswith("gt_") and not proposals_per_image.has(trg_name):
+                        secondbest_value = trg_value[sampled_second_best_targets]
+                        secondbest_value[no_second_best_target] = empty_target
+                        proposals_per_image.set(trg_name.replace('gt_', 'gt_second_best'),
+                                                trg_value[sampled_second_best_targets])
+
+
+            else:
+                gt_boxes = Boxes(
+                    targets_per_image.gt_boxes.tensor.new_zeros((len(sampled_idxs), 4))
+                )
+                proposals_per_image.gt_boxes = gt_boxes
+
+            num_bg_samples.append((gt_classes == self.num_classes).sum().item())
+            num_fg_samples.append(gt_classes.numel() - num_bg_samples[-1])
+            proposals_with_gt.append(proposals_per_image)
+
+        # Log the number of fg/bg samples that are selected for training ROI heads
+        storage = get_event_storage()
+        storage.put_scalar("roi_head/num_fg_samples", np.mean(num_fg_samples))
+        storage.put_scalar("roi_head/num_bg_samples", np.mean(num_bg_samples))
+
+        return proposals_with_gt
 
     def _forward_mask(self, features, instances):
         """
