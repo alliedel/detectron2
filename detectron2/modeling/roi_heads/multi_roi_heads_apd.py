@@ -4,11 +4,10 @@ import logging
 
 import numpy as np
 import torch
-from detectron2.modeling.matcher import Matcher
+from torch.nn import functional as F
 
-from detectron2.layers import ShapeSpec
-from detectron2.modeling.roi_heads.multi_mask_head_apd import build_custom_mask_head, multi_mask_rcnn_inference, \
-    multi_mask_rcnn_loss
+from detectron2.layers import ShapeSpec, cat
+from detectron2.modeling.roi_heads import multi_mask_head_apd
 from detectron2.modeling.roi_heads.roi_heads import ROI_HEADS_REGISTRY
 from detectron2.modeling.roi_heads.roi_heads import StandardROIHeads, select_foreground_proposals
 from detectron2.structures import Boxes, Instances, pairwise_iou
@@ -18,7 +17,6 @@ from ..poolers import ROIPooler
 from ..proposal_generator.proposal_utils import add_ground_truth_to_proposals
 
 logger = logging.getLogger(__name__)
-
 
 MASK_HEAD_TYPES = {
     'custom': 'custom',
@@ -75,7 +73,7 @@ class MultiROIHeadsAPD(StandardROIHeads):
                 self.mask_heads[head_type_name] = build_mask_head(
                     cfg, ShapeSpec(channels=in_channels, width=pooler_resolution, height=pooler_resolution))
             elif head_type_name == 'custom':
-                self.mask_heads[head_type_name] = build_custom_mask_head(
+                self.mask_heads[head_type_name] = multi_mask_head_apd.build_custom_mask_head(
                     cfg, ShapeSpec(channels=in_channels, width=pooler_resolution, height=pooler_resolution))
             else:
                 raise ValueError(f'{head_type_name} is not one of head types')
@@ -159,7 +157,7 @@ class MultiROIHeadsAPD(StandardROIHeads):
             #   (0,0), (1,1), (1,3) means proposal 0 has alternate gt 0, proposal 1 has alternate gt 1, and proposal 3
             #   has alternate gt 1.
 
-            secondary_assignments = secondary_match_quality_matrix.nonzero()
+            # secondary_assignments = secondary_match_quality_matrix.nonzero()  # useful for tertiary, etc. assignments
             second_best_assignments = secondary_match_quality_matrix.max(axis=0)
 
             # Set target attributes of the sampled proposals:
@@ -174,21 +172,35 @@ class MultiROIHeadsAPD(StandardROIHeads):
                 # like masks, keypoints, etc, will filter the proposals again,
                 # (by foreground/background, or number of keypoints in the image, etc)
                 # so we essentially index the data twice.
+                existing_field_names = list(proposals_per_image.get_fields().keys())  # apd: use later for secondary
                 for (trg_name, trg_value) in targets_per_image.get_fields().items():
                     if trg_name.startswith("gt_") and not proposals_per_image.has(trg_name):
                         proposals_per_image.set(trg_name, trg_value[sampled_targets])
 
                 # Assigning second best indices
                 sampled_second_best_targets = second_best_assignments.indices[sampled_idxs]
-                no_second_best_target = second_best_assignments.values == 0
+                no_second_best_target = (second_best_assignments.values[sampled_idxs] == 0).to(dtype=torch.bool)
                 for (trg_name, trg_value) in targets_per_image.get_fields().items():
-                    empty_target = type(trg_value)([])  # Create empty instance
-                    if trg_name.startswith("gt_") and not proposals_per_image.has(trg_name):
-                        secondbest_value = trg_value[sampled_second_best_targets]
-                        secondbest_value[no_second_best_target] = empty_target
-                        proposals_per_image.set(trg_name.replace('gt_', 'gt_second_best'),
-                                                trg_value[sampled_second_best_targets])
+                    if trg_name is 'gt_boxes':
+                        empty_target = type(trg_value)([0, 0, 0, 0])  # Create empty instance
+                    else:
+                        try:
+                            empty_target = type(trg_value)([])  # Create empty instance
+                        except:
+                            print('Build a custom empty target for {} in {}'.format(trg_name, __file__))
+                            raise
 
+                    trg_secondary_name = trg_name.replace('gt_', 'gt_second_best_')
+                    if trg_name.startswith("gt_") and trg_name not in existing_field_names:
+                        secondbest_value = trg_value[sampled_second_best_targets]
+                        if trg_name == 'gt_boxes':
+                            secondbest_value[no_second_best_target].tensor = 0
+                        elif trg_name == 'gt_masks':
+                            for i in no_second_best_target.nonzero():
+                                secondbest_value.polygons[i] = []
+                        else:
+                            raise NotImplementedError
+                        proposals_per_image.set(trg_secondary_name, secondbest_value)
 
             else:
                 gt_boxes = Boxes(
@@ -233,7 +245,7 @@ class MultiROIHeadsAPD(StandardROIHeads):
             if self.active_mask_head is 'standard':
                 return {"loss_mask": mask_rcnn_loss(mask_logits, proposals)}
             elif self.active_mask_head is 'custom':
-                return {"loss_mask": multi_mask_rcnn_loss(mask_logits, proposals)}
+                return {"loss_mask": multi_mask_head_apd.multi_mask_rcnn_loss(mask_logits, proposals)}
         else:
             pred_boxes = [x.pred_boxes for x in instances]
             mask_features = self.mask_pooler(features, pred_boxes)
@@ -246,8 +258,9 @@ class MultiROIHeadsAPD(StandardROIHeads):
                     for inst in instances:
                         inst.pred_masks_standard = inst.pred_masks
                         inst.pred_masks = [None for _ in inst.pred_masks]
-                multi_mask_rcnn_inference(mask_logits, instances,
-                                          self.mask_heads[self.active_mask_head].num_instances_per_class)
+                multi_mask_head_apd.multi_mask_rcnn_inference(mask_logits, instances,
+                                                              self.mask_heads[
+                                                                  self.active_mask_head].num_instances_per_class)
             else:
                 raise ValueError
 
