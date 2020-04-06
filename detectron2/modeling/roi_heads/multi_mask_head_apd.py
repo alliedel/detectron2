@@ -34,7 +34,9 @@ def multi_mask_rcnn_loss(pred_mask_logits, instances, n_masks_per_roi=2):
 
     # Temporary test: len(instances) == pred_mask_logits.size(1) / n_masks_per_roi
     logit_sets = [pred_mask_logits[:, ::n_masks_per_roi, :, :] for i in range(n_masks_per_roi)]
-    losses = [custom_mask_rcnn_loss(logits, instances, [i.gt_masks for i in instances]) for logits in
+    # losses = [custom_mask_rcnn_loss(logits, instances, [i.gt_masks for i in instances]) for logits in
+    #           logit_sets]
+    losses = [custom_mask_rcnn_loss(logits, instances, [i.gt_second_best_masks for i in instances]) for logits in
               logit_sets]
     return sum(losses)
 

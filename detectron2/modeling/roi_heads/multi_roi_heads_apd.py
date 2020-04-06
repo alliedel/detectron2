@@ -137,7 +137,7 @@ class MultiROIHeadsAPD(StandardROIHeads):
             # APD: Multi-instance addition. Add secondary gt for foreground proposal samples
 
             # torch.topk:
-            # topk.indices[r, c] contains the groundtruth index of the r'th best match to proposal c
+            # topk.indices[r, c] contaimatched_idxsns the groundtruth index of the r'th best match to proposal c
             # topk.values[r, c] contains the iou overlap between proposal c and groundtruth topk.indices[r, c]
             # topk.values should be in the range (0, 1)
 
@@ -150,7 +150,10 @@ class MultiROIHeadsAPD(StandardROIHeads):
                 proposals_matched_to_this_gt = matched_idxs == gt_idx
                 if torch.any(proposals_matched_to_this_gt):
                     gt_of_other_clss = targets_per_image.gt_classes != gt_cls
-                    secondary_match_quality_matrix[gt_of_other_clss][:, proposals_matched_to_this_gt] = NOT_SAME_CLASS
+                    # secondary_match_quality_matrix[gt_of_other_clss, proposals_matched_to_this_gt] = NOT_SAME_CLASS
+                    # secondary_match_quality_matrix[gt_of_other_clss][:, proposals_matched_to_this_gt] = NOT_SAME_CLASS
+                    secondary_match_quality_matrix[gt_of_other_clss.nonzero(), proposals_matched_to_this_gt] = \
+                        NOT_SAME_CLASS
                     secondary_match_quality_matrix[gt_idx, proposals_matched_to_this_gt] = PRIMARY_ASSIGNMENT
 
             # r,c of proposal, alternate gt_idx mapping.  For instance:
@@ -179,25 +182,25 @@ class MultiROIHeadsAPD(StandardROIHeads):
 
                 # Assigning second best indices
                 sampled_second_best_targets = second_best_assignments.indices[sampled_idxs]
+                sampled_second_best_values = second_best_assignments.values[sampled_idxs]
+
+                primary_and_secondary_gt_classes_match = torch.all(
+                    (targets_per_image.gt_classes[sampled_second_best_targets]
+                     == targets_per_image.gt_classes[sampled_targets])
+                    | (sampled_second_best_values == 0))
+                assert primary_and_secondary_gt_classes_match
                 no_second_best_target = (second_best_assignments.values[sampled_idxs] == 0).to(dtype=torch.bool)
                 for (trg_name, trg_value) in targets_per_image.get_fields().items():
-                    if trg_name is 'gt_boxes':
-                        empty_target = type(trg_value)([0, 0, 0, 0])  # Create empty instance
-                    else:
-                        try:
-                            empty_target = type(trg_value)([])  # Create empty instance
-                        except:
-                            print('Build a custom empty target for {} in {}'.format(trg_name, __file__))
-                            raise
-
                     trg_secondary_name = trg_name.replace('gt_', 'gt_second_best_')
                     if trg_name.startswith("gt_") and trg_name not in existing_field_names:
                         secondbest_value = trg_value[sampled_second_best_targets]
                         if trg_name == 'gt_boxes':
-                            secondbest_value[no_second_best_target].tensor = 0
+                            secondbest_value.tensor[no_second_best_target] = 0
                         elif trg_name == 'gt_masks':
+                            assert len(no_second_best_target) == len(secondbest_value.polygons)
                             for i in no_second_best_target.nonzero():
-                                secondbest_value.polygons[i] = []
+                                for j in range(len(secondbest_value.polygons[i])):
+                                    secondbest_value.polygons[i][j][:] = 0
                         else:
                             raise NotImplementedError
                         proposals_per_image.set(trg_secondary_name, secondbest_value)
