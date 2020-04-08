@@ -1,18 +1,21 @@
 # Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
+from detectron2.layers import paste_masks_in_image
+
+from detectron2.structures import ImageList
+from detectron2.utils.logger import log_first_n
+from .build import META_ARCH_REGISTRY
+from ..backbone import build_backbone
+from ..proposal_generator import build_proposal_generator
+from ..roi_heads import build_roi_heads
+
+__all__ = ["GeneralizedRCNN", "ProposalNetwork"]
+
+
 import logging
 import torch
 from torch import nn
 
-from detectron2.structures import ImageList
-from detectron2.utils.logger import log_first_n
-
-from ..backbone import build_backbone
-from ..postprocessing import detector_postprocess
-from ..proposal_generator import build_proposal_generator
-from ..roi_heads import build_roi_heads
-from .build import META_ARCH_REGISTRY
-
-__all__ = ["GeneralizedRCNN", "ProposalNetwork"]
+from detectron2.structures import Instances
 
 
 @META_ARCH_REGISTRY.register()
@@ -142,7 +145,7 @@ class GeneralizedRCNN(nn.Module):
             ):
                 height = input_per_image.get("height", image_size[0])
                 width = input_per_image.get("width", image_size[1])
-                r = detector_postprocess(results_per_image, height, width)
+                r = multimask_apd_detector_postprocess(results_per_image, height, width)
                 processed_results.append({"instances": r})
             if trace_proposals:
                 return processed_results, proposal_details
@@ -228,3 +231,65 @@ class ProposalNetwork(nn.Module):
             r = detector_postprocess(results_per_image, height, width)
             processed_results.append({"proposals": r})
         return processed_results
+
+
+def multimask_apd_detector_postprocess(results, output_height, output_width, mask_threshold=0.5):
+    """
+    Resize the output instances.
+    The input images are often resized when entering an object detector.
+    As a result, we often need the outputs of the detector in a different
+    resolution from its inputs.
+
+    This function will resize the raw outputs of an R-CNN detector
+    to produce outputs according to the desired output resolution.
+
+    Args:
+        results (Instances): the raw outputs from the detector.
+            `results.image_size` contains the input image resolution the detector sees.
+            This object might be modified in-place.
+        output_height, output_width: the desired output resolution.
+
+    Returns:
+        Instances: the resized output from the model, based on the output resolution
+    """
+    scale_x, scale_y = (output_width / results.image_size[1], output_height / results.image_size[0])
+    results = Instances((output_height, output_width), **results.get_fields())
+
+    if results.has("pred_boxes"):
+        output_boxes = results.pred_boxes
+    elif results.has("proposal_boxes"):
+        output_boxes = results.proposal_boxes
+
+    output_boxes.scale(scale_x, scale_y)
+    output_boxes.clip(results.image_size)
+
+    results = results[output_boxes.nonempty()]
+
+    if results.has("pred_masks"):
+        results.pred_masks = paste_masks_in_image(
+            results.pred_masks[:, 0, :, :],  # N, 1, M, M
+            results.pred_boxes,
+            results.image_size,
+            threshold=mask_threshold,
+        )
+    if results.has("pred_masks1"):
+        results.pred_masks1 = paste_masks_in_image(
+            results.pred_masks1[:, 0, :, :],  # N, 1, M, M
+            results.pred_boxes,
+            results.image_size,
+            threshold=mask_threshold,
+        )
+    if results.has("pred_masks2"):
+        results.pred_masks2 = paste_masks_in_image(
+            results.pred_masks2[:, 0, :, :],  # N, 1, M, M
+            results.pred_boxes,
+            results.image_size,
+            threshold=mask_threshold,
+        )
+
+    if results.has("pred_keypoints"):
+        results.pred_keypoints[:, :, 0] *= scale_x
+        results.pred_keypoints[:, :, 1] *= scale_y
+
+    return results
+

@@ -33,11 +33,12 @@ def multi_mask_rcnn_loss(pred_mask_logits, instances, n_masks_per_roi=2):
     assert (float(n_masks) / n_masks_per_roi) == n_cls, ValueError('Should be divisible by n_instances_per_class')
 
     # Temporary test: len(instances) == pred_mask_logits.size(1) / n_masks_per_roi
-    logit_sets = [pred_mask_logits[:, ::n_masks_per_roi, :, :] for i in range(n_masks_per_roi)]
+    logit_sets = [pred_mask_logits[:, i::n_masks_per_roi, :, :] for i in range(n_masks_per_roi)]
     # losses = [custom_mask_rcnn_loss(logits, instances, [i.gt_masks for i in instances]) for logits in
     #           logit_sets]
-    losses = [custom_mask_rcnn_loss(logits, instances, [i.gt_second_best_masks for i in instances]) for logits in
-              logit_sets]
+    
+    gt_sets = [[i.gt_masks for i in instances], [i.gt_second_best_masks for i in instances]]
+    losses = [custom_mask_rcnn_loss(logits, instances, gt_set) for logits, gt_set in zip(logit_sets, gt_sets)]
     return sum(losses)
 
 
@@ -120,7 +121,7 @@ def custom_mask_rcnn_loss(pred_mask_logits, instances, gt_masks_raw: List[Polygo
     return mask_loss
 
 
-def multi_mask_rcnn_inference(pred_mask_logits, pred_instances, n_instances_per_class=2):
+def multi_mask_rcnn_inference(pred_mask_logits, pred_instances, n_instances_per_class=2, inference_channel=1):
     """
     Convert pred_mask_logits to estimated foreground probability masks while also
     extracting only the masks for the predicted classes in pred_instances. For each
@@ -145,6 +146,8 @@ def multi_mask_rcnn_inference(pred_mask_logits, pred_instances, n_instances_per_
             the predicted masks to the original image resolution and/or binarizing them, is left
             to the caller.
     """
+    assert inference_channel in range(1, n_instances_per_class+1)
+
     assert pred_mask_logits.shape[1] % n_instances_per_class == 0, \
         f'{pred_mask_logits.shape[1]} % {n_instances_per_class} != 0'  # Should be C*I
     cls_agnostic_mask = pred_mask_logits.size(1) == n_instances_per_class
@@ -166,9 +169,9 @@ def multi_mask_rcnn_inference(pred_mask_logits, pred_instances, n_instances_per_
     mask_probs_pred_ch2 = mask_probs_pred_ch2.split(num_boxes_per_image, dim=0)
 
     for prob_ch1, prob_ch2, instances in zip(mask_probs_pred_ch1, mask_probs_pred_ch2, pred_instances):
-        instances.pred_masks = prob_ch1  # (1, Hmask, Wmask)
+        instances.pred_masks1 = prob_ch1  # (1, Hmask, Wmask)
         instances.pred_masks2 = prob_ch2  # (1, Hmask, Wmask)
-
+        instances.pred_masks = instances.pred_masks1 if inference_channel == 1 else instances.pred_masks2
 
 @ROI_MASK_HEAD_REGISTRY.register()
 class CustomMaskRCNNConvUpsampleHeadAPD(nn.Module):
