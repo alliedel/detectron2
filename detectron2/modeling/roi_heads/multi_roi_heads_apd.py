@@ -48,8 +48,6 @@ class MultiROIHeadsAPD(StandardROIHeads):
 
     def _init_mask_heads(self, cfg):
         # fmt: off
-        # self.proposal_selection_function_for_loss = largest_box_per_class
-        self.proposal_selection_function_for_loss = None
         self.mask_on = cfg.MODEL.MASK_ON
         if not self.mask_on:
             return
@@ -268,44 +266,3 @@ class MultiROIHeadsAPD(StandardROIHeads):
                 raise ValueError
 
             return instances
-
-
-def find_largest_proposal_per_image(mask_logits, proposals):
-    raise NotImplementedError
-
-
-def largest_box_per_class(mask_logits, proposals):
-    chosen_box_idxs_batch = []
-    for p in proposals:
-        cbi = []
-        areas = p.gt_boxes.area()
-        classes = p.gt_classes
-        unique_classes = p.gt_classes.unique()
-        assert len(classes.shape) == 1
-        for uc in unique_classes:
-            mask = classes == uc
-            subset_idx = torch.argmin(areas[mask])
-            if subset_idx.numel() > 1:
-                subset_idx = subset_idx[0]
-            box_idx = torch.arange(classes.shape[0])[mask][subset_idx.item()].item()
-            assert box_idx < len(p)
-            cbi.append(box_idx)
-
-        chosen_box_idxs_batch.append(cbi)
-    return chosen_box_idxs_batch
-
-
-def mask_rcnn_loss_with_proposal_subset(mask_logits, proposals, proposal_selection_function):
-    if proposal_selection_function is None:
-        selected_mask_logits, selected_proposals = mask_logits, proposals
-    else:
-        selected_idxs = proposal_selection_function(mask_logits, proposals)
-        selected_idxs_as_one_for_logits = []
-        offset = 0
-        for p, si in zip(proposals, selected_idxs):
-            selected_idxs_as_one_for_logits.extend([s + offset for s in si])
-            offset += len(p)
-        selected_mask_logits = mask_logits[selected_idxs_as_one_for_logits, :, :, :]
-        selected_proposals = [p[si] for p, si in zip(proposals, selected_idxs)]
-
-    return mask_rcnn_loss(selected_mask_logits, selected_proposals)
