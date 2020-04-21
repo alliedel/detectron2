@@ -13,7 +13,7 @@ from detectron2.layers import Conv2d, ConvTranspose2d, ShapeSpec, cat, get_norm
 from detectron2.modeling.roi_heads.mask_head import ROI_MASK_HEAD_REGISTRY
 
 
-def multi_mask_rcnn_loss(pred_mask_logits, instances, n_masks_per_roi=2, matching=True):
+def multi_mask_rcnn_loss(pred_mask_logits, instances, n_masks_per_roi=2, matching=False):
     """
     pred_mask_logits (Tensor): A tensor of shape (B, C*I, Hmask, Wmask) or (B, 1, Hmask, Wmask)
         for class-specific or class-agnostic, where B is the total number of predicted masks
@@ -32,9 +32,6 @@ def multi_mask_rcnn_loss(pred_mask_logits, instances, n_masks_per_roi=2, matchin
     n_masks = pred_mask_logits.size(1)
     n_cls = n_masks // n_masks_per_roi
     assert (float(n_masks) / n_masks_per_roi) == n_cls, ValueError('Should be divisible by n_instances_per_class')
-
-    torch.save({'pred_mask_logits': pred_mask_logits, 'instances': instances, 'n_masks_per_roi': n_masks_per_roi},
-               'tmp_matching_loss.pt')
 
     # gt_sets[<primary>][<imgidx>0] where 0=<primary>,1=<secondary>, and batchsize=1 would mean imgidx can only be 0
 
