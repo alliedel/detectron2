@@ -253,9 +253,9 @@ class MultiROIHeadsAPD(StandardROIHeads):
             pred_boxes = [x.pred_boxes for x in instances]
             mask_features = self.mask_pooler(features, pred_boxes)
             mask_logits = self.mask_heads[self.active_mask_head](mask_features)
-            if self.active_mask_head is 'standard':
+            if self.active_mask_head == 'standard':
                 mask_rcnn_inference(mask_logits, instances)
-            elif self.active_mask_head is 'custom':
+            elif self.active_mask_head == 'custom':
                 if 1:
                     mask_rcnn_inference(mask_logits, instances)
                     for inst in instances:

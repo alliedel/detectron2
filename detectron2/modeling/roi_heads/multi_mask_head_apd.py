@@ -40,7 +40,6 @@ def multi_mask_rcnn_loss(pred_mask_logits, instances, n_masks_per_roi=2, matchin
         gt_sets = [[i.gt_masks for i in instances], [i.gt_second_best_masks for i in instances]]
         losses = [custom_mask_rcnn_loss(logits, instances, gt_set)
                   for logits, gt_set in zip(logit_sets, gt_sets)]
-        return sum(losses)
     else:
         losses = get_matching_xent_losses(instances, pred_mask_logits, n_masks_per_roi)
     return sum(losses)
