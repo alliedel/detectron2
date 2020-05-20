@@ -266,6 +266,7 @@ def multimask_apd_detector_postprocess(results, output_height, output_width, mas
     results = results[output_boxes.nonempty()]
 
     if results.has("pred_masks"):
+        results.pred_masks_soft = results.pred_masks
         results.pred_masks = paste_masks_in_image(
             results.pred_masks[:, 0, :, :],  # N, 1, M, M
             results.pred_boxes,
@@ -273,6 +274,7 @@ def multimask_apd_detector_postprocess(results, output_height, output_width, mas
             threshold=mask_threshold,
         )
     if results.has("pred_masks1"):
+        results.pred_masks1_soft = results.pred_masks1
         results.pred_masks1 = paste_masks_in_image(
             results.pred_masks1[:, 0, :, :],  # N, 1, M, M
             results.pred_boxes,
@@ -280,6 +282,7 @@ def multimask_apd_detector_postprocess(results, output_height, output_width, mas
             threshold=mask_threshold,
         )
     if results.has("pred_masks2"):
+        results.pred_masks2_soft = results.pred_masks2
         results.pred_masks2 = paste_masks_in_image(
             results.pred_masks2[:, 0, :, :],  # N, 1, M, M
             results.pred_boxes,
