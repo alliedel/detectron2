@@ -1,0 +1,1 @@
+docker run --gpus all --ipc=host -v /home/allie/repos/multi-instance-mask-rcnn-extension/:/workspace/multi-instance-mask-rcnn-extension -v /home/allie/data:/workspace/data -v /home/allie/code/common/my_tools:/workspace/my_tools --user runuser:runuser-group -it maskrcnnextension-nvidia:latest
