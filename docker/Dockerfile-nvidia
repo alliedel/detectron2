@@ -1,0 +1,35 @@
+FROM nvcr.io/nvidia/pytorch:19.10-py3
+
+RUN apt-get update && apt-get install -y emacs
+RUN apt-get update && apt-get install sudo
+RUN pip install --upgrade pip
+RUN pip install cython; pip install 'git+https://github.com/cocodataset/cocoapi.git#subdirectory=PythonAPI'
+RUN pip install torch==1.6.0+cu101 torchvision==0.7.0+cu101 -f https://download.pytorch.org/whl/torch_stable.html
+RUN pip install 'git+https://github.com/facebookresearch/fvcore'
+
+# install detectron2
+RUN git clone https://github.com/facebookresearch/detectron2 /workspace/detectron2_repo
+ENV FORCE_CUDA="1"
+ENV TORCH_CUDA_ARCH_LIST="Maxwell;Maxwell+Tegra;Pascal;Volta;Turing"
+RUN pip install -e /workspace/detectron2_repo
+
+COPY requirements.txt .
+RUN pip install -r requirements.txt
+
+#WORKDIR /workspace/detectron2_repo
+
+
+# run it, for example:
+# wget http://images.cocodataset.org/val2017/000000439715.jpg -O input.jpg
+# python3 demo/demo.py  \                                                                                                            #--config-file configs/COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x.yaml \                                                #--input input.jpg \                                                                                                         #--opts MODEL.WEIGHTS detectron2://COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x/137849600/model_final_f10217.pkl   
+
+ENV PYTHONPATH=$PYTHONPATH:/workspace/my_tools
+ARG UID=1000
+ARG GID=1000
+RUN groupadd -g $GID runuser-group
+RUN useradd --create-home -N -l -u $UID -g runuser-group -G sudo --shell /bin/bash runuser
+RUN echo runuser:newpassword | chpasswd
+ENV NVIDIA_VISIBLE_DEVICES all
+ENV NVIDIA_DRIVER_CAPABILITIES compute,utility
+ENV NVIDIA_REQUIRE_CUDA "cuda>=8.0"
+#RUN chown -R runuser:$(id -gn runuser) /home/runuser/.config
