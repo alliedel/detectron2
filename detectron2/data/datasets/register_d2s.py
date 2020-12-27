@@ -2,16 +2,16 @@ from detectron2.data.datasets import register_coco_instances
 
 
 def register_all_d2s():
-    register_coco_instances("d2s_train", {}, "/home/adelgior/data/datasets/d2s/annotations/D2S_training.json",
-                            "/home/adelgior/data/datasets/d2s/images/")
-    register_coco_instances("d2s_val", {}, "/home/adelgior/data/datasets/d2s/annotations/D2S_validation.json",
-                            "/home/adelgior/data/datasets/d2s/images/")
+    register_coco_instances("d2s_train", {}, "data/datasets/d2s/annotations/D2S_training.json",
+                            "data/datasets/d2s/images/")
+    register_coco_instances("d2s_val", {}, "data/datasets/d2s/annotations/D2S_validation.json",
+                            "data/datasets/d2s/images/")
     register_coco_instances("d2s_val_clutter", {},
-                            "/home/adelgior/data/datasets/d2s/annotations/D2S_validation_clutter.json",
-                            "/home/adelgior/data/datasets/d2s/images/")
+                            "data/datasets/d2s/annotations/D2S_validation_clutter.json",
+                            "data/datasets/d2s/images/")
     register_coco_instances("d2s_val_occlusion", {},
-                            "/home/adelgior/data/datasets/d2s/annotations/D2S_validation_occlusion.json",
-                            "/home/adelgior/data/datasets/d2s/images/")
+                            "data/datasets/d2s/annotations/D2S_validation_occlusion.json",
+                            "data/datasets/d2s/images/")
 
 
 register_all_d2s()
