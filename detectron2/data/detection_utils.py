@@ -27,7 +27,7 @@ from detectron2.structures import (
 
 # For bitmap->polygon conversion, sometimes it's not perfect and one of the polygons is just two points (I dont
 # know why).  We only save in noop.  Set to None if you don't want to save it.
-SAVE_DROPPED_POLYGONS_DIR = "./scrap_local/dropped_polygons/"
+SAVE_DROPPED_POLYGONS_DIR = None  # "./scrap_local/dropped_polygons/"
 
 from . import transforms as T
 from .catalog import MetadataCatalog
@@ -177,27 +177,6 @@ def transform_instance_annotations(
             # Convert to polygons
             polygons_transf = imantics.Mask(bitmask).polygons().points
 
-            # img = np.ones((im_sz[0], im_sz[1], 1), np.uint8) * 255
-            # for polygon in polygons_transf:
-            #     for i in range(1, polygon.shape[0]):
-            #         cv2.line(img, tuple(polygon[i - 1, :]), tuple(polygon[i, :]), color=(0, 255, 0), thickness=9)
-            # cv2.imwrite('bitmask.png', bitmask.astype(np.uint8) * 255)
-            # cv2.imwrite('tmp.png', img)
-            #
-            # imantics uses r,c; coco uses x,y
-
-            if 0:
-                xy_polygons = []
-                for polygon in polygons_transf:
-                    p = polygon[:, ::-1]
-                    p[:, 1] = H - 1 - p[:, 1]  # Double check -1?
-                    xy_polygons.append(p)
-                polygons_transf = xy_polygons
-
-            # apply_polygons expects (x, y) format.
-            # (x, y) format in absolute coordinates.
-            # The coordinates are not pixel indices. Coordinates on an image of
-            # shape (H, W) are in range [0, W] or [0, H].
             segms = [
                 p.reshape(-1) for p in transforms.apply_polygons(polygons_transf)
             ]
@@ -216,49 +195,17 @@ def transform_instance_annotations(
                     good_polygons.append(new_polygon)
                 else:
                     good_polygons.append(polygon)
+            segms = good_polygons
 
-            # Debug mode
-            if SAVE_DROPPED_POLYGONS_DIR is not None:
-                new_sz = transforms.apply_box(np.array([0, 0, W, H])[None, :])[0]
-                assert new_sz[0] == new_sz[1] == 0
-                new_W, new_H = new_sz[2:]
-                if not os.path.exists(SAVE_DROPPED_POLYGONS_DIR):
-                    os.mkdir(SAVE_DROPPED_POLYGONS_DIR)
-                if len(bad_polygons) > 0:
-                    subdir = os.path.join(SAVE_DROPPED_POLYGONS_DIR, f"{image_id}")
-                    if not os.path.exists(subdir):
-                        os.mkdir(subdir)
-                    cv2.imwrite(f"{subdir}/mask.png", bitmask * 255)
-                    np.save(f"{subdir}/mask.npy", bitmask)
-                    segms_l = len(segms)
-                    segms = good_polygons
-                    assert len(segms) < segms_l, 'For temp debug only: code is incorrect.'
-                    logger = logging.getLogger(__name__)
-                    logger.warning(f"Dropped a tiny polygon from {image_id}")
+            if len(bad_polygons) > 0:
+                logger = logging.getLogger(__name__)
+                logger.warning(f"Dropped a tiny polygon from {image_id}")
 
                 # Debug only (should never happen after we weeded out the bad ones)
                 for poly_i, polygon in enumerate(segms):
                     assert len(polygon.shape) == 1
                     if not (len(polygon) % 2 == 0 and len(polygon) >= 6):
                         raise Exception
-
-                if SAVE_DROPPED_POLYGONS_DIR is not None:
-                    if len(bad_polygons) > 0:
-                        segm_v3 = [s.reshape(-1, ) for s in segms]
-                        bitmask_v3 = polygons_to_bitmask(segm_v3, new_H, new_W)
-                        cv2.imwrite(f"{subdir}/mask_after_dropped_polygon.png", bitmask_v3 * 255)
-                        np.save(f"{subdir}/mask_after_dropped_polygon.npy", bitmask_v3)
-                    else:
-                        if np.random.binomial(1, 0.1, size=None):
-                            subdir = os.path.join(SAVE_DROPPED_POLYGONS_DIR, f"{image_id}_notdropped")
-                            if not os.path.exists(subdir):
-                                os.mkdir(subdir)
-                            cv2.imwrite(f"{subdir}/mask.png", bitmask * 255)
-                            np.save(f"{subdir}/mask.npy", bitmask)
-                            segm_v3 = [s.reshape(-1, ) for s in segms]
-                            bitmask_v3 = polygons_to_bitmask(segm_v3, new_H, new_W)
-                            cv2.imwrite(f"{subdir}/mask_after_transformation.png", bitmask_v3 * 255)
-                            np.save(f"{subdir}/mask_after_transformation.npy", bitmask_v3)
 
             annotation["segmentation"] = segms
         else:
