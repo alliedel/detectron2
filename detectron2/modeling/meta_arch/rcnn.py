@@ -137,7 +137,7 @@ class GeneralizedRCNN(nn.Module):
             detected_instances = [x.to(self.device) for x in detected_instances]
             results = self.roi_heads.forward_with_given_boxes(features, detected_instances)
 
-        proposal_details = self.dictoflists_to_listofdicts(proposal_details)
+        proposal_details = self.dictoflists_to_listofdicts(proposal_details) if proposal_details is not None else None
         if do_postprocess:
             processed_results = []
             for results_per_image, input_per_image, image_size in zip(
