@@ -12,6 +12,9 @@ def register_all_d2s():
     register_coco_instances("d2s_val_occlusion", {},
                             "data/datasets/d2s/annotations/D2S_validation_occlusion.json",
                             "data/datasets/d2s/images/")
+    register_coco_instances("d2s_val_wo_occlusion", {},
+                            "data/datasets/d2s/annotations/D2S_validation_wo_occlusion.json",
+                            "data/datasets/d2s/images/")
 
 
 register_all_d2s()
